@@ -16,6 +16,8 @@ const inputOffsetY = document.getElementById('offsetY');
 const inputScale = document.getElementById('scale');
 const inputTileShape = document.getElementById('tileShape');
 const inputAngle = document.getElementById('angle');
+const inputMinOffcut = document.getElementById('minOffcut');
+const parquetOptions = document.getElementById('parquetOptions');
 
 const preciseInputGroup = document.getElementById('preciseInputGroup');
 const inputWallLength = document.getElementById('wallLength');
@@ -26,6 +28,10 @@ const statAreaMarge = document.getElementById('statAreaMarge');
 const statFullTiles = document.getElementById('statFullTiles');
 const statCutTiles = document.getElementById('statCutTiles');
 const statTotalTiles = document.getElementById('statTotalTiles');
+
+const labelFull = document.getElementById('labelFull');
+const labelCut = document.getElementById('labelCut');
+const labelTotal = document.getElementById('labelTotal');
 
 // State
 let mode = 'DRAW'; // DRAW, EDIT
@@ -55,6 +61,7 @@ function saveState() {
             tileH: inputTileH.value,
             joint: inputJoint.value,
             angle: inputAngle.value,
+            minOffcut: inputMinOffcut ? inputMinOffcut.value : '30',
             offsetX: inputOffsetX.value,
             offsetY: inputOffsetY.value,
             scale: inputScale.value,
@@ -91,6 +98,7 @@ function loadState() {
     if (data.tileH != null) inputTileH.value = data.tileH;
     if (data.joint != null) inputJoint.value = data.joint;
     if (data.angle != null) inputAngle.value = data.angle;
+    if (data.minOffcut != null && inputMinOffcut) inputMinOffcut.value = data.minOffcut;
     if (data.offsetX != null) inputOffsetX.value = data.offsetX;
     if (data.offsetY != null) inputOffsetY.value = data.offsetY;
     if (data.scale != null) inputScale.value = data.scale;
@@ -99,6 +107,7 @@ function loadState() {
     if (inputTileShape.value === 'hexa' || inputTileShape.value === 'octo') {
         inputTileH.disabled = true;
     }
+    updateShapeOptions();
 
     // Hide the empty-state overlay if a drawing was restored
     if (points.length > 0) instructions.classList.add('hidden');
@@ -125,9 +134,14 @@ btnClear.addEventListener('click', () => {
     draw();
 });
 
-[inputTileW, inputTileH, inputJoint, inputOffsetX, inputOffsetY, inputScale, inputTileShape, inputAngle].forEach(el => {
+[inputTileW, inputTileH, inputJoint, inputOffsetX, inputOffsetY, inputScale, inputTileShape, inputAngle, inputMinOffcut].forEach(el => {
     if (el) el.addEventListener('input', draw);
 });
+
+function updateShapeOptions() {
+    const shape = inputTileShape ? inputTileShape.value : 'rect';
+    if (parquetOptions) parquetOptions.style.display = (shape === 'parquet') ? 'block' : 'none';
+}
 
 if (inputTileShape) {
     inputTileShape.addEventListener('change', () => {
@@ -140,6 +154,7 @@ if (inputTileShape) {
         } else {
             inputTileH.disabled = false;
         }
+        updateShapeOptions();
         draw();
     });
 }
@@ -442,6 +457,12 @@ function draw() {
         tH = tW;
     }
 
+    // Adapt stat labels to vocabulary (carreaux vs lames de parquet)
+    const isParquet = shape === 'parquet';
+    if (labelFull) labelFull.innerText = isParquet ? 'Lames pleines:' : 'Carreaux pleins:';
+    if (labelCut) labelCut.innerText = isParquet ? 'Lames coupées:' : 'Carreaux coupés:';
+    if (labelTotal) labelTotal.innerText = isParquet ? 'Total lames à acheter:' : 'Total carreaux requis:';
+
     // Draw Room Polygon
     if (points.length > 0) {
         ctx.beginPath();
@@ -574,7 +595,115 @@ function draw() {
         const offsetX_px = (oX * pxlScale) % stepX;
         const offsetY_px = (oY * pxlScale) % stepY;
 
-        // Generator for tiles 
+        // ---- Parquet à coupe perdue ----
+        // Les lames sont posées en rangées (selon l'axe X local). La dernière lame
+        // d'une rangée est coupée au mur, et sa chute démarre la rangée suivante
+        // (tant qu'elle est >= longueur minimale réutilisable, sinon elle est perdue).
+        if (shape === 'parquet') {
+            const plankLen_px = tileH_px;   // longueur de lame (sens de pose, axe X)
+            const plankWid_px = tileW_px;   // largeur de lame (empilement, axe Y)
+            const minOffcut_px = (parseFloat(inputMinOffcut?.value) || 0) * pxlScale;
+
+            const pStepY = plankWid_px + joint_px;
+            const pOffY = (oY * pxlScale) % pStepY;
+            const startY = Math.floor((minY - pOffY) / pStepY) * pStepY + pOffY;
+
+            let fullCount = 0, cutCount = 0, reusedPieces = 0, purchased = 0;
+            // Le décalage X initial sert d'amorce de chute pour décaler la 1ère rangée
+            let offcut = oX > 0 ? oX * pxlScale : 0;
+
+            ctx.lineWidth = 1;
+
+            for (let y = startY; y <= maxY; y += pStepY) {
+                let x = minX;
+                let pendingReuse = offcut;
+                let rowOffcut = 0;
+                let guard = 0;
+
+                while (x < maxX - 0.01 && guard++ < 20000) {
+                    let len, fresh;
+                    if (pendingReuse > 0.01) {
+                        // Démarre la rangée avec la chute récupérée (gratuite)
+                        len = pendingReuse;
+                        fresh = false;
+                        pendingReuse = 0;
+                    } else {
+                        // Nouvelle lame pleine prélevée dans le stock
+                        len = plankLen_px;
+                        fresh = true;
+                    }
+
+                    let drawLen = len;
+                    let cutHere = false;
+                    let leftover = 0;
+                    if (x + len > maxX + 0.01) {
+                        drawLen = maxX - x;
+                        leftover = len - drawLen;
+                        cutHere = true;
+                    }
+
+                    const localPoly = [
+                        { x: x, y: y },
+                        { x: x + drawLen, y: y },
+                        { x: x + drawLen, y: y + plankWid_px },
+                        { x: x, y: y + plankWid_px }
+                    ];
+                    const globalPoly = localPoly.map(p => {
+                        const r = rotatePoint(p, angleRad);
+                        return { x: r.x + anchor.x, y: r.y + anchor.y };
+                    });
+
+                    const status = testTileIntersection(globalPoly, points);
+                    if (status) {
+                        const displayCut = cutHere || status === 'CUT';
+
+                        ctx.beginPath();
+                        ctx.moveTo(globalPoly[0].x, globalPoly[0].y);
+                        for (let i = 1; i < globalPoly.length; i++) ctx.lineTo(globalPoly[i].x, globalPoly[i].y);
+                        ctx.closePath();
+
+                        if (displayCut) {
+                            ctx.fillStyle = "rgba(231, 76, 60, 0.30)";   // lame coupée au mur
+                        } else if (!fresh) {
+                            ctx.fillStyle = "rgba(150, 111, 60, 0.55)";  // chute réutilisée
+                        } else {
+                            ctx.fillStyle = "rgba(199, 159, 110, 0.45)"; // lame pleine
+                        }
+                        ctx.strokeStyle = "rgba(110, 75, 40, 0.85)";
+                        ctx.fill();
+                        ctx.stroke();
+
+                        if (fresh) purchased++;       // chaque lame neuve = 1 lame à acheter
+                        else reusedPieces++;          // démarrage sur une chute = gratuit
+                        if (displayCut) cutCount++;
+                        else if (fresh) fullCount++;
+                    }
+
+                    if (cutHere) {
+                        rowOffcut = leftover >= minOffcut_px ? leftover : 0;
+                        x = maxX; // rangée terminée
+                    } else {
+                        x = x + drawLen + joint_px;
+                    }
+                }
+                offcut = rowOffcut;
+            }
+
+            ctx.restore();
+
+            const areaPx = polygonArea(points);
+            const areaM2 = areaPx / (pxlScale * pxlScale) / 10000;
+            statArea.innerText = areaM2.toFixed(2) + " m²";
+            statAreaMarge.innerText = (areaM2 * 1.1).toFixed(2) + " m²";
+            statFullTiles.innerText = fullCount;
+            statCutTiles.innerText = cutCount;
+            let totalTxt = purchased + " lames";
+            if (reusedPieces > 0) totalTxt += " (+" + reusedPieces + " chutes réutilisées)";
+            statTotalTiles.innerText = totalTxt;
+            return;
+        }
+
+        // Generator for tiles
         let localTiles = [];
 
         if (shape === 'rect') {

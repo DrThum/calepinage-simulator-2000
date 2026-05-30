@@ -57,6 +57,7 @@
                         <select id="tileShape"
                             style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; background: white; font-family: 'Outfit', sans-serif;">
                             <option value="rect">Rectangle</option>
+                            <option value="parquet">Parquet (coupe perdue)</option>
                             <option value="hexa">Hexagone</option>
                             <option value="octo">Octogone (+ Cabochons)</option>
                         </select>
@@ -76,6 +77,14 @@
                     <div>
                         <label for="angle">Angle (°)</label>
                         <input type="number" id="angle" value="0" min="-180" max="180" step="5">
+                    </div>
+                    <div id="parquetOptions" style="grid-column: span 2; display: none;">
+                        <label for="minOffcut">Longueur min. de chute réutilisable (cm)</label>
+                        <input type="number" id="minOffcut" value="30" min="0" step="5">
+                        <small style="color: var(--text-muted); margin-top: 8px; display: block; line-height: 1.3;">
+                            En pose à coupe perdue, la chute d'une rangée démarre la suivante.
+                            En dessous de cette longueur, la chute est jetée.
+                        </small>
                     </div>
                 </div>
             </div>
@@ -118,15 +127,15 @@
                     <strong id="statAreaMarge">0.00 m²</strong>
                 </div>
                 <div class="stat-row">
-                    <span>Carreaux pleins:</span>
+                    <span id="labelFull">Carreaux pleins:</span>
                     <strong id="statFullTiles">0</strong>
                 </div>
                 <div class="stat-row">
-                    <span>Carreaux coupés:</span>
+                    <span id="labelCut">Carreaux coupés:</span>
                     <strong id="statCutTiles">0</strong>
                 </div>
                 <div class="stat-row total">
-                    <span>Total carreaux requis:</span>
+                    <span id="labelTotal">Total carreaux requis:</span>
                     <strong id="statTotalTiles">0</strong>
                 </div>
             </div>

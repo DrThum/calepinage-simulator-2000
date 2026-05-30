@@ -18,6 +18,7 @@ const inputTileShape = document.getElementById('tileShape');
 const inputAngle = document.getElementById('angle');
 const inputMinOffcut = document.getElementById('minOffcut');
 const parquetOptions = document.getElementById('parquetOptions');
+const tooltip = document.getElementById('tooltip');
 
 const preciseInputGroup = document.getElementById('preciseInputGroup');
 const inputWallLength = document.getElementById('wallLength');
@@ -45,6 +46,9 @@ let initialOffset = { x: 0, y: 0 };
 
 const SNAP_DIST = 15; // pixels to snap to start point
 const POINT_RADIUS = 6;
+
+// Pieces laid in the last render, for hover tooltips (global poly + real cut dims in cm)
+let laidPlanks = [];
 
 // Persistence (auto-save to browser localStorage)
 const STORAGE_KEY = 'calepinage_state_v1';
@@ -347,7 +351,36 @@ canvas.addEventListener('mouseleave', () => {
     isDraggingGrid = false;
     isDraggingPoint = null;
     canvas.style.cursor = mode === 'DRAW' ? 'crosshair' : 'grab';
+    if (tooltip) tooltip.style.display = 'none';
     draw();
+});
+
+// Hover tooltip: show the real (cut) dimensions of the plank under the cursor
+function formatCm(n) {
+    return (Math.round(n * 10) / 10).toString().replace('.', ',');
+}
+
+canvas.addEventListener('mousemove', () => {
+    if (!tooltip) return;
+
+    let found = null;
+    // Iterate from the last drawn so the topmost piece wins
+    for (let i = laidPlanks.length - 1; i >= 0; i--) {
+        if (pointInPolygon(mousePos, laidPlanks[i].poly)) {
+            found = laidPlanks[i];
+            break;
+        }
+    }
+
+    if (found) {
+        tooltip.textContent = `${formatCm(found.w)} × ${formatCm(found.l)} cm`
+            + (found.cut ? ' · coupe' : '');
+        tooltip.style.left = mousePos.x + 'px';
+        tooltip.style.top = mousePos.y + 'px';
+        tooltip.style.display = 'block';
+    } else {
+        tooltip.style.display = 'none';
+    }
 });
 
 // Math Helpers
@@ -379,6 +412,34 @@ function pointInPolygon(point, vs) {
         if (intersect) inside = !inside;
     }
     return inside;
+}
+
+// Clip a subject polygon against an axis-aligned rectangle (Sutherland-Hodgman).
+// Returns the intersection polygon (the part of `poly` inside the rect).
+function clipPolyToRect(poly, x0, y0, x1, y1) {
+    const clip = (pts, inside, intersect) => {
+        if (pts.length === 0) return pts;
+        const res = [];
+        for (let i = 0; i < pts.length; i++) {
+            const cur = pts[i];
+            const prev = pts[(i + pts.length - 1) % pts.length];
+            const curIn = inside(cur);
+            const prevIn = inside(prev);
+            if (curIn) {
+                if (!prevIn) res.push(intersect(prev, cur));
+                res.push(cur);
+            } else if (prevIn) {
+                res.push(intersect(prev, cur));
+            }
+        }
+        return res;
+    };
+    let p = poly;
+    p = clip(p, pt => pt.x >= x0, (a, b) => { const t = (x0 - a.x) / (b.x - a.x); return { x: x0, y: a.y + t * (b.y - a.y) }; });
+    p = clip(p, pt => pt.x <= x1, (a, b) => { const t = (x1 - a.x) / (b.x - a.x); return { x: x1, y: a.y + t * (b.y - a.y) }; });
+    p = clip(p, pt => pt.y >= y0, (a, b) => { const t = (y0 - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y: y0 }; });
+    p = clip(p, pt => pt.y <= y1, (a, b) => { const t = (y1 - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y: y1 }; });
+    return p;
 }
 
 // Line intersection
@@ -437,6 +498,7 @@ function testTileIntersection(tilePoly, roomPoly) {
 
 function draw() {
     scheduleSave();
+    laidPlanks = []; // rebuilt below for hover tooltips
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Grid Background
@@ -677,6 +739,29 @@ function draw() {
                         else reusedPieces++;          // démarrage sur une chute = gratuit
                         if (displayCut) cutCount++;
                         else if (fresh) fullCount++;
+
+                        // Real cut dimensions: clip the plank rectangle against the
+                        // actual room polygon (handles non-rectangular rooms / L-shapes),
+                        // then take the bounding box of the visible piece.
+                        let wPx = plankWid_px, lPx = drawLen;
+                        const clipped = clipPolyToRect(localPoints, x, y, x + drawLen, y + plankWid_px);
+                        if (clipped.length >= 3) {
+                            let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+                            for (const pt of clipped) {
+                                if (pt.x < bx0) bx0 = pt.x;
+                                if (pt.x > bx1) bx1 = pt.x;
+                                if (pt.y < by0) by0 = pt.y;
+                                if (pt.y > by1) by1 = pt.y;
+                            }
+                            lPx = bx1 - bx0;
+                            wPx = by1 - by0;
+                        }
+                        laidPlanks.push({
+                            poly: globalPoly,
+                            w: wPx / pxlScale,
+                            l: lPx / pxlScale,
+                            cut: displayCut
+                        });
                     }
 
                     if (cutHere) {

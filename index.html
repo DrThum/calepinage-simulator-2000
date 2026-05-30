@@ -150,6 +150,11 @@
         <main class="canvas-container" id="canvasContainer">
             <canvas id="appCanvas"></canvas>
 
+            <!-- Tooltip showing the dimensions of the hovered plank/tile -->
+            <div id="tooltip"
+                style="position: absolute; pointer-events: none; display: none; background: rgba(44, 62, 80, 0.95); color: #fff; padding: 6px 10px; border-radius: 6px; font: 600 13px 'Outfit', sans-serif; white-space: nowrap; transform: translate(-50%, -135%); z-index: 10; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);">
+            </div>
+
             <!-- Instructions overlay when empty -->
             <div class="instructions" id="instructions">
                 <h3>Commencez par dessiner votre pièce</h3>

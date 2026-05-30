@@ -40,6 +40,70 @@ let initialOffset = { x: 0, y: 0 };
 const SNAP_DIST = 15; // pixels to snap to start point
 const POINT_RADIUS = 6;
 
+// Persistence (auto-save to browser localStorage)
+const STORAGE_KEY = 'calepinage_state_v1';
+let saveTimer = null;
+
+function saveState() {
+    try {
+        const data = {
+            mode,
+            points,
+            isClosed,
+            tileShape: inputTileShape.value,
+            tileW: inputTileW.value,
+            tileH: inputTileH.value,
+            joint: inputJoint.value,
+            angle: inputAngle.value,
+            offsetX: inputOffsetX.value,
+            offsetY: inputOffsetY.value,
+            scale: inputScale.value,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+        // Ignore quota / private-mode errors so drawing keeps working
+    }
+}
+
+// Debounced save so high-frequency redraws (drag, mousemove) don't spam storage
+function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveState, 300);
+}
+
+function loadState() {
+    let data;
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        data = JSON.parse(raw);
+    } catch (e) {
+        return;
+    }
+    if (!data) return;
+
+    if (Array.isArray(data.points)) points = data.points;
+    isClosed = !!data.isClosed;
+    if (data.mode) mode = data.mode;
+
+    if (data.tileShape != null) inputTileShape.value = data.tileShape;
+    if (data.tileW != null) inputTileW.value = data.tileW;
+    if (data.tileH != null) inputTileH.value = data.tileH;
+    if (data.joint != null) inputJoint.value = data.joint;
+    if (data.angle != null) inputAngle.value = data.angle;
+    if (data.offsetX != null) inputOffsetX.value = data.offsetX;
+    if (data.offsetY != null) inputOffsetY.value = data.offsetY;
+    if (data.scale != null) inputScale.value = data.scale;
+
+    // Keep tileH locked for shapes that derive it
+    if (inputTileShape.value === 'hexa' || inputTileShape.value === 'octo') {
+        inputTileH.disabled = true;
+    }
+
+    // Hide the empty-state overlay if a drawing was restored
+    if (points.length > 0) instructions.classList.add('hidden');
+}
+
 // Resize canvas to fill container
 function resizeCanvas() {
     canvas.width = container.clientWidth;
@@ -357,6 +421,7 @@ function testTileIntersection(tilePoly, roomPoly) {
 }
 
 function draw() {
+    scheduleSave();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Grid Background
@@ -645,4 +710,7 @@ function draw() {
 }
 
 // Init
+loadState();
+setMode(mode); // sync buttons / cursor / precise-input visibility with restored mode
+window.addEventListener('beforeunload', saveState); // flush latest state on close/refresh
 resizeCanvas();
